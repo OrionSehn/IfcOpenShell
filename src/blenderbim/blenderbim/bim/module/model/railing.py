@@ -84,9 +84,20 @@ def update_railing_modifier_ifc_data(context):
     )
 
     if props.railing_type == "WALL_MOUNTED_HANDRAIL":
-        pass # TODO: add representation
+        body = ifcopenshell.util.representation.get_context(ifc_file, "Model", "Body", "MODEL_VIEW")
+        railing_path = [Vector(v) for v in RailingData.data["parameters"]["data_dict"]["path_data"]["verts"]]
+        representation_data = {
+            "railing_type": props.railing_type,
+            "context": body,
+            # TODO: unsafe since vertex order can be mixed up
+            "railing_path": railing_path,
+        }
+        model_representation = ifcopenshell.api.run("geometry.add_railing_representation", ifc_file, **representation_data)
+        tool.Model.replace_object_ifc_representation(body, obj, model_representation)
+
     elif props.railing_type == "FRAMELESS_PANEL":
         tool.Ifc.edit(obj)
+
 
 def update_bbim_railing_pset(element, railing_data):
     pset = tool.Pset.get_element_pset(element, "BBIM_Railing")

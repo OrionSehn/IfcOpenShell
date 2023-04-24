@@ -515,6 +515,20 @@ class ShapeBuilder:
         )
         return extruded_area
 
+    def create_swept_disk_solid(self, path_curve, radius):
+        if path_curve.Dim != 3:
+            # TODO: replace with exception
+            raise Exception(
+                f"Path curve for IfcSweptDiskSolid should be 3D to be valid, currently it has {path_curve.Dim} dimensions.\n"
+                "Ref: https://ifc43-docs.standards.buildingsmart.org/IFC/RELEASE/IFC4x3/HTML/lexical/IfcSweptDiskSolid.htm#8.8.3.42.4-Formal-propositions"
+            )
+        
+        disk_solid = self.file.createIfcSweptDiskSolid(
+            Directrix=path_curve,
+            Radius=radius
+        )
+        return disk_solid
+
     def get_representation(self, context, items, representation_type=None):
         # > items - could be a list or single curve/IfcExtrudedAreaSolid
         # < IfcShapeRepresentation
@@ -522,7 +536,7 @@ class ShapeBuilder:
             items = [items]
 
         if not representation_type:
-            if items[0].is_a("IfcExtrudedAreaSolid"):
+            if items[0].is_a() in ("IfcExtrudedAreaSolid", "IfcSweptDiskSolid"):
                 representation_type = "SweptSolid"
             elif items[0].is_a("IfcCurve") and items[0].Dim == 3:
                 representation_type = "Curve3D"
