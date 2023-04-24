@@ -68,7 +68,7 @@ class Usecase:
         terminal_coords = [start]
         terminal_coords.append(start + ter_dir * terminal_radius + terminal_radius*z_down)
         terminal_coords.append(start + terminal_radius * 2 * z_down)
-        terminal_path = builder.polyline(terminal_coords, closed=False)
+        terminal_path = builder.polyline(terminal_coords, closed=False, arc_points=[1])
         terminal_solid = builder.create_swept_disk_solid(terminal_path, railing_radius)
 
         representation = builder.get_representation(ifc_context, items=[railing_solid, terminal_solid])

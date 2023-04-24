@@ -7,63 +7,32 @@ V = lambda *x: Vector([float(i) for i in x])
 
 # TODO: move examples to more suitable place
 def simple_uses():
+    def mm(x):
+        """mm to meters"""
+        return x / 1000
+
     ifc_file = ifcopenshell.file()
     builder = ShapeBuilder(ifc_file)
-    triangle_curve = builder.polyline(( (0., 0.), (1., 2.), (2., 0.) ), closed=True)
-    print(triangle_curve)
 
-    rectangle_curve = builder.rectangle()
-    print(rectangle_curve)
+    coords = [V(0, 0, 1), V(1, 0, 1), V(2, 0, 1)]
+    path = builder.polyline(coords, closed=False, arc_points=[])
+    print(path)
 
-    circle_curve = builder.circle()
-    print(circle_curve)
+    return
+    railing_diameter = mm(50)
+    railing_radius = railing_diameter/2
+    coords = [V(0, 0, 1), V(1, 0, 1), V(2, 0, 1)]
+    disk_path = builder.polyline(coords, closed=False)
+    disk_solid = builder.create_swept_disk_solid(disk_path, railing_radius)
 
-    translated_rect = builder.translate(rectangle_curve, Vector( (2.5, 2.5) ), create_copy=True)
-    print(translated_rect)
-
-    rotated_triangle = builder.rotate(triangle_curve, 90, 
-        pivot_point=Vector( (1., 1.) ),
-        counter_clockwise=True,
-        create_copy=True)
-    print(rotated_triangle)
-
-    a, b = builder.translate(
-            [rectangle_curve, circle_curve], 
-            Vector( (5., 5.) ), create_copy=True)
-    print(f"Multiple translated objects: {a}, {b}")
-
-    c, d = builder.rotate(
-            [a, b], 90,
-            pivot_point=Vector( (0., 0.) ),
-            counter_clockwise=False, 
-            create_copy=True)
-    print(f'Multiple rotated objects: {c}, {d}')
-
-    mirrored_objects = builder.mirror(
-        [a, b],
-        mirror_axes=[Vector((1.0, 0.0)), Vector((0.0, 1.0)), Vector((1.0, 1.0))],
-        mirror_point=Vector((3.0, 3.0)),
-        create_copy=True,
-    )
-    print(f"Multiple mirrored objects: {mirrored_objects}")
-
-    rotated_circle = builder.rotate(
-        builder.translate(circle_curve, Vector((5.0, 5.0)), create_copy=True),
-        90,
-        pivot_point=Vector((0.0, 0.0)),
-        counter_clockwise=True,
-        create_copy=True,
-    )
-    print(rotated_circle)
-
-    profile = builder.profile(
-        rectangle_curve, "test_profile", 
-        inner_curves=[builder.circle(center=Vector((0.5, 0.5)), radius=0.2)]
-    )
-    print(profile)
-
-    extruded_area = builder.extrude(profile, 5.0)
-    print(extruded_area)
+    terminal_radius = mm(150)
+    start = coords[0]
+    ter_dir = (coords[0]-coords[1]).xy.to_3d().normalized()
+    terminal_coords = [start]
+    terminal_coords.append(start + ter_dir * terminal_radius + terminal_radius*V(0,0,-1))
+    terminal_coords.append(start + terminal_radius * 2 * V(0,0,-1))
+    terminal_path = builder.polyline(terminal_coords, closed=False)
+    terminal_solid = builder.create_swept_disk_solid(terminal_path, railing_radius)
 
     ifc_file.write("tmp.ifc")
 

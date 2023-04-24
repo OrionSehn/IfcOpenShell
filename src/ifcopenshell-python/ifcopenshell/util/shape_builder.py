@@ -35,10 +35,22 @@ class ShapeBuilder:
     def __init__(self, ifc_file):
         self.file = ifc_file
 
-    def polyline(self, points, closed=False, position_offset=None):
+    def polyline(self, points, closed=False, position_offset=None, arc_points=[]):
         # > points - list of points formatted like ( (x0, y0), (x1, y1) )
         # < IfcIndexedPolyCurve
-        segments = [(i, i + 1) for i in range(1, len(points))]
+        segments = []
+
+        cur_i = 0
+        while cur_i < len(points) - 1:
+            print(cur_i)
+            cur_i_ifc = cur_i + 1
+            if cur_i+1 in arc_points:
+                segments.append((cur_i_ifc, cur_i_ifc+1, cur_i_ifc+2))
+                cur_i += 2
+            else:
+                segments.append((cur_i_ifc, cur_i_ifc + 1))
+                cur_i += 1
+
         if closed:
             segments.append((len(points), 1))
         if position_offset:
@@ -50,7 +62,12 @@ class ShapeBuilder:
         elif dimensions == 3:
             ifc_points = self.file.createIfcCartesianPointList3D(points)
 
-        ifc_segments = [self.file.createIfcLineIndex(segment) for segment in segments]
+        ifc_segments = []
+        for segment in segments:
+            if len(segment) == 2:
+                ifc_segments.append(self.file.createIfcLineIndex(segment))
+            elif len(segment) == 3:
+                ifc_segments.append(self.file.createIfcArcIndex(segment))
         ifc_curve = self.file.createIfcIndexedPolyCurve(Points=ifc_points, Segments=ifc_segments)
         return ifc_curve
 
