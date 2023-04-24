@@ -82,8 +82,11 @@ def update_railing_modifier_ifc_data(context):
             "Height": props.height,
         },
     )
-    tool.Ifc.edit(obj)
 
+    if props.railing_type == "WALL_MOUNTED_HANDRAIL":
+        pass # TODO: add representation
+    elif props.railing_type == "FRAMELESS_PANEL":
+        tool.Ifc.edit(obj)
 
 def update_bbim_railing_pset(element, railing_data):
     pset = tool.Pset.get_element_pset(element, "BBIM_Railing")
@@ -118,61 +121,67 @@ def update_railing_modifier_bmesh(context):
         tool.Blender.apply_bmesh(obj.data, bm)
         return
 
-    # generating the entire railing
-    height = props.height * si_conversion
-    thickness = props.thickness * si_conversion
-    spacing = props.spacing * si_conversion
+    if props.railing_type != "FRAMELESS_PANEL":
+        return
 
-    # spacing
-    # split each edge in 3 segments by 0.5 * spacing by x-y plane
-    main_edges = bm.edges[:]
-    for main_edge in main_edges:
-        bm_split_edge_at_offset(main_edge, spacing)
+    def generate_frameless_panel_railing():
+        # generating FRAMELESS_PANEL railing
+        height = props.height * si_conversion
+        thickness = props.thickness * si_conversion
+        spacing = props.spacing * si_conversion
 
-    # thickness
-    # keep track of translated verts so we won't translate the same
-    # vert twice
-    edge_dissolving_verts = []
-    for main_edge in main_edges:
-        v0, v1 = main_edge.verts
-        edge_dissolving_verts.extend([v0, v1])
+        # spacing
+        # split each edge in 3 segments by 0.5 * spacing by x-y plane
+        main_edges = bm.edges[:]
+        for main_edge in main_edges:
+            bm_split_edge_at_offset(main_edge, spacing)
 
-        edge_dir = ((v1.co - v0.co) * V(1, 1, 0)).normalized()
-        ortho_vector = edge_dir.cross(V(0, 0, 1))
+        # thickness
+        # keep track of translated verts so we won't translate the same
+        # vert twice
+        edge_dissolving_verts = []
+        for main_edge in main_edges:
+            v0, v1 = main_edge.verts
+            edge_dissolving_verts.extend([v0, v1])
 
-        extruded_geom = bmesh.ops.extrude_edge_only(bm, edges=[main_edge])["geom"]
+            edge_dir = ((v1.co - v0.co) * V(1, 1, 0)).normalized()
+            ortho_vector = edge_dir.cross(V(0, 0, 1))
+
+            extruded_geom = bmesh.ops.extrude_edge_only(bm, edges=[main_edge])["geom"]
+            extruded_verts = bm_sort_out_geom(extruded_geom)["verts"]
+            bmesh.ops.translate(bm, vec=ortho_vector * (-thickness / 2), verts=extruded_verts)
+
+            extruded_geom = bmesh.ops.extrude_edge_only(bm, edges=[main_edge])["geom"]
+            extruded_verts = bm_sort_out_geom(extruded_geom)["verts"]
+            bmesh.ops.translate(bm, vec=ortho_vector * (thickness / 2), verts=extruded_verts)
+
+            # dissolve middle edge
+            bmesh.ops.dissolve_edges(bm, edges=[main_edge])
+
+        # height
+        extruded_geom = bmesh.ops.extrude_face_region(bm, geom=bm.faces)["geom"]
         extruded_verts = bm_sort_out_geom(extruded_geom)["verts"]
-        bmesh.ops.translate(bm, vec=ortho_vector * (-thickness / 2), verts=extruded_verts)
+        extrusion_vector = Vector((0, 0, 1)) * height
+        bmesh.ops.translate(bm, vec=extrusion_vector, verts=extruded_verts)
 
-        extruded_geom = bmesh.ops.extrude_edge_only(bm, edges=[main_edge])["geom"]
-        extruded_verts = bm_sort_out_geom(extruded_geom)["verts"]
-        bmesh.ops.translate(bm, vec=ortho_vector * (thickness / 2), verts=extruded_verts)
+        # dissolve middle edges
+        edges_to_dissolve = []
+        verts_to_dissolve = []
+        for v in edge_dissolving_verts:
+            for e in v.link_edges:
+                other_vert = e.other_vert(v)
+                if other_vert in extruded_verts:
+                    edges_to_dissolve.append(e)
+                    verts_to_dissolve.append(other_vert)
+        bmesh.ops.dissolve_edges(bm, edges=edges_to_dissolve)
+        bmesh.ops.dissolve_verts(bm, verts=verts_to_dissolve)
 
-        # dissolve middle edge
-        bmesh.ops.dissolve_edges(bm, edges=[main_edge])
+        # to remove unnecessary verts in 0 spacing case
+        bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=0.0001)
 
-    # height
-    extruded_geom = bmesh.ops.extrude_face_region(bm, geom=bm.faces)["geom"]
-    extruded_verts = bm_sort_out_geom(extruded_geom)["verts"]
-    extrusion_vector = Vector((0, 0, 1)) * height
-    bmesh.ops.translate(bm, vec=extrusion_vector, verts=extruded_verts)
-
-    # dissolve middle edges
-    edges_to_dissolve = []
-    verts_to_dissolve = []
-    for v in edge_dissolving_verts:
-        for e in v.link_edges:
-            other_vert = e.other_vert(v)
-            if other_vert in extruded_verts:
-                edges_to_dissolve.append(e)
-                verts_to_dissolve.append(other_vert)
-    bmesh.ops.dissolve_edges(bm, edges=edges_to_dissolve)
-    bmesh.ops.dissolve_verts(bm, verts=verts_to_dissolve)
-
-    # to remove unnecessary verts in 0 spacing case
-    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=0.0001)
-
-    tool.Blender.apply_bmesh(obj.data, bm)
+        tool.Blender.apply_bmesh(obj.data, bm)
+    
+    generate_frameless_panel_railing()
 
 
 def get_path_data(obj):

@@ -494,7 +494,10 @@ class BIMDoorProperties(PropertyGroup):
 
 
 class BIMRailingProperties(PropertyGroup):
-    railing_types = (("FRAMELESS_PANEL", "FRAMELESS_PANEL", ""),)
+    railing_types = (
+        ("FRAMELESS_PANEL", "FRAMELESS_PANEL", ""),
+        ("WALL_MOUNTED_HANDRAIL", "WALL_MOUNTED_HANDRAIL", ""),
+    )
 
     railing_added_previously: bpy.props.BoolProperty(default=False)
     is_editing: bpy.props.IntProperty(default=-1)
