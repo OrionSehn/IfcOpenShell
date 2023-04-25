@@ -569,3 +569,13 @@ class ShapeBuilder:
 
     def deep_copy(self, element):
         return ifcopenshell.util.element.copy_deep(self.file, element)
+
+    # UTILITIES
+    def extrude_by_y_kwargs(self):
+        """shortcut for `ShapeBuilder.extrude` to extrude by y axis.
+        it assumes you have 2d profile in xz plane and trying to extrude it by y axis"""
+        return {
+            'position_x_axis': Vector((1, 0, 0)),
+            'position_z_axis': Vector((0, -1, 0)),
+            'extrusion_vector': Vector((0, 0, -1)),
+        }
