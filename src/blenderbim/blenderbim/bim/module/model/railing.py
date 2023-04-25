@@ -95,6 +95,9 @@ def update_railing_modifier_ifc_data(context):
         model_representation = ifcopenshell.api.run("geometry.add_railing_representation", ifc_file, **representation_data)
         tool.Model.replace_object_ifc_representation(body, obj, model_representation)
 
+        # hacky way to ensure tha ifc representation won't get tessellated
+        IfcStore.edited_objs.discard(obj)
+
     elif props.railing_type == "FRAMELESS_PANEL":
         tool.Ifc.edit(obj)
 

@@ -42,7 +42,6 @@ class ShapeBuilder:
 
         cur_i = 0
         while cur_i < len(points) - 1:
-            print(cur_i)
             cur_i_ifc = cur_i + 1
             if cur_i+1 in arc_points:
                 segments.append((cur_i_ifc, cur_i_ifc+1, cur_i_ifc+2))

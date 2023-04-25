@@ -21,6 +21,7 @@ from ifcopenshell.util.shape_builder import ShapeBuilder, V
 from itertools import chain
 from mathutils import Vector
 import collections
+from pprint import pprint
 
 
 def mm(x):
@@ -52,26 +53,39 @@ class Usecase:
 
     def execute(self):
         ifc_context = self.settings["context"]
-        coords = self.settings['railing_path']
+        railing_coords = self.settings['railing_path']
+        arc_points = []
         
         railing_diameter = self.convert_si_to_unit(mm(50))
         railing_radius = railing_diameter / 2
-        z_down = self.convert_si_to_unit(V(0,0,-1))
+        z_down = V(0,0,-1)
+        terminal_radius = self.convert_si_to_unit(mm(150))
+
+        def add_cap(start=False):
+            nonlocal railing_coords, arc_points            
+            railing_coords_for_cap = railing_coords[::-1] if start else railing_coords
+
+            start = railing_coords_for_cap[-1]
+            cap_dir = (railing_coords_for_cap[-1]-railing_coords_for_cap[-2]).xy.to_3d().normalized()
+            arc_point = start + cap_dir * terminal_radius + terminal_radius*z_down
+            arc_points.append(arc_point)
+            cap_coords = [arc_point, start + terminal_radius * 2 * z_down]
+
+            railing_coords = railing_coords_for_cap + cap_coords
+
+            if start:
+                railing_coords = railing_coords[::-1]
+
+        add_cap(start=True)
+        add_cap(start=False)
+
+        pprint(railing_coords) # TODO: remove after debug
 
         builder = ShapeBuilder(self.file)
-        railing_path = builder.polyline(coords, closed=False)
+        railing_path = builder.polyline(railing_coords, closed=False, 
+                                        arc_points=[railing_coords.index(p) for p in arc_points])
         railing_solid = builder.create_swept_disk_solid(railing_path, railing_radius)
-
-        terminal_radius = mm(150)
-        start = coords[0]
-        ter_dir = (coords[0]-coords[1]).xy.to_3d().normalized()
-        terminal_coords = [start]
-        terminal_coords.append(start + ter_dir * terminal_radius + terminal_radius*z_down)
-        terminal_coords.append(start + terminal_radius * 2 * z_down)
-        terminal_path = builder.polyline(terminal_coords, closed=False, arc_points=[1])
-        terminal_solid = builder.create_swept_disk_solid(terminal_path, railing_radius)
-
-        representation = builder.get_representation(ifc_context, items=[railing_solid, terminal_solid])
+        representation = builder.get_representation(ifc_context, items=railing_solid)
         return representation
 
     def convert_si_to_unit(self, value):
