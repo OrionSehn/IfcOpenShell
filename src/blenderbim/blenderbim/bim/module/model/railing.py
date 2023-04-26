@@ -18,14 +18,11 @@
 
 
 import bpy
-from bpy.types import Operator
 import bmesh
-
 import ifcopenshell
 from ifcopenshell.util.shape_builder import V
 import blenderbim
 import blenderbim.tool as tool
-import blenderbim.core.geometry as core
 from blenderbim.bim.helper import convert_property_group_from_si
 from blenderbim.bim.ifc import IfcStore
 from blenderbim.bim.module.model.door import bm_sort_out_geom
@@ -40,6 +37,8 @@ import json
 # https://ifc43-docs.standards.buildingsmart.org/IFC/RELEASE/IFC4x3/HTML/lexical/IfcRailing.htm
 # https://ifc43-docs.standards.buildingsmart.org/IFC/RELEASE/IFC4x3/HTML/lexical/IfcRailingType.htm
 
+
+NON_SI_RAILING_PROPS = ("is_editing", "railing_type", "railing_added_previously", "use_manual_supports", "terminal_type")
 
 def bm_split_edge_at_offset(edge, offset):
     v0, v1 = edge.verts
@@ -91,6 +90,12 @@ def update_railing_modifier_ifc_data(context):
             "context": body,
             # TODO: unsafe since vertex order can be mixed up
             "railing_path": railing_path,
+            "use_manual_supports": props.use_manual_supports,
+            "support_spacing": props.support_spacing,
+            "railing_diameter": props.railing_diameter,
+            "clear_width": props.clear_width,
+            "terminal_type": props.terminal_type,
+            "height": props.height,
         }
         model_representation = ifcopenshell.api.run("geometry.add_railing_representation", ifc_file, **representation_data)
         tool.Model.replace_object_ifc_representation(body, obj, model_representation)
@@ -271,8 +276,7 @@ class AddRailing(bpy.types.Operator, tool.Ifc.Operator):
 
         # need to make sure all default props will have correct units
         if not props.railing_added_previously:
-            skip_props = ("is_editing", "railing_type", "railing_added_previously")
-            convert_property_group_from_si(props, skip_props=skip_props)
+            convert_property_group_from_si(props, skip_props=NON_SI_RAILING_PROPS)
 
         railing_data = props.get_general_kwargs()
         path_data = get_path_data(obj)
@@ -312,8 +316,7 @@ class EnableEditingRailing(bpy.types.Operator, tool.Ifc.Operator):
 
         # need to make sure all props that weren't used before
         # will have correct units
-        skip_props = ("is_editing", "railing_type", "railing_added_previously")
-        skip_props += tuple(data.keys())
+        skip_props = NON_SI_RAILING_PROPS + tuple(data.keys()) 
         convert_property_group_from_si(props, skip_props=skip_props)
 
         props.is_editing = 1

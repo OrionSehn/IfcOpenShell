@@ -21,13 +21,15 @@ from ifcopenshell.util.shape_builder import ShapeBuilder, V
 from itertools import chain
 from mathutils import Vector
 import collections
+import mathutils
 from pprint import pprint
-from math import pi, cos, sin
+from math import pi, cos, sin, tan
 
 
 def mm(x):
     """mm to meters shortcut for readability"""
     return x / 1000
+
 class Usecase:
     def __init__(self, file, **settings):
         """
@@ -45,6 +47,12 @@ class Usecase:
                 "context": None,  # IfcGeometricRepresentationContext
                 "railing_type": "WALL_MOUNTED_HANDRAIL",
                 "railing_path": self.path_si_to_units( [V(0, 0, 1), V(1, 0, 1), V(2, 0, 1)] ),
+                "use_manual_supports": False,
+                "support_spacing": self.convert_si_to_unit(mm(1000)),
+                "railing_diameter": self.convert_si_to_unit(mm(50)),
+                "clear_width": self.convert_si_to_unit(mm(40)),
+                "terminal_type": '180',
+                "height": self.convert_si_to_unit(mm(1000)),
             }
         )
 
@@ -52,25 +60,39 @@ class Usecase:
             self.settings[key] = value
 
         if self.settings['railing_type'] != 'WALL_MOUNTED_HANDRAIL':
-            raise Exception('Only WALL_MOUNTED_HANDRAIL railing_type is supported at the moment.')
+            raise Exception('Only "WALL_MOUNTED_HANDRAIL" railing_type is supported at the moment.')
 
     def execute(self):
-        builder = ShapeBuilder(self.file)
         arc_points = []
         items_3d = []
-        railing_diameter = self.convert_si_to_unit(mm(50))
+        builder = ShapeBuilder(self.file)
+        z_down = V(0,0,-1)
+
+        # measurements
+        # from settings
+        use_manual_supports = self.settings['use_manual_supports']
+        railing_radius = self.settings['railing_diameter'] / 2
+        support_spacing = self.settings['support_spacing']
+        clear_width = self.settings['clear_width']
+        height = self.settings['height']
+        cap_type = self.settings['terminal_type']
+        ifc_context = self.settings["context"]
+        railing_coords = self.settings['railing_path']
+        railing_coords = [p - z_down * railing_radius for p in railing_coords]
+
+        # constant        
         terminal_radius = self.convert_si_to_unit(mm(150))
-        clear_width = self.convert_si_to_unit(mm(40))
-        railing_radius = railing_diameter / 2
+        railing_fillet_radius = self.convert_si_to_unit(mm(100))
         support_length = clear_width + railing_radius
         support_radius = self.convert_si_to_unit(mm(10))
         support_disk_radius = railing_radius
         support_disk_depth = self.convert_si_to_unit(mm(20))
-        z_down = V(0,0,-1)
 
-        ifc_context = self.settings["context"]
-        railing_coords = self.settings['railing_path']
-        railing_coords = [p - z_down * railing_radius for p in railing_coords]
+
+        # util functions
+        float_is_zero = lambda f: 0.0001 >= f >= -0.0001
+        collinear = lambda d0, d1: float_is_zero(d0.angle(d1))
+
         
         def add_cap(start=False):
             nonlocal railing_coords, arc_points            
@@ -87,28 +109,106 @@ class Usecase:
             if start:
                 railing_coords = railing_coords[::-1]
 
-        def get_support_on_point(point, direction):
+        def add_support_on_point(point, direction):
             ortho_dir = (direction.yx * V(1, -1)).to_3d().normalized()
             arc_center = point + ortho_dir * support_length
             support_points = [
                 point, 
                 arc_center - ortho_dir * support_length * cos(pi/4)  + z_down * support_length * sin(pi/4) , 
                 arc_center + z_down * support_length]
-            print('support points', support_points)
             polyline = builder.polyline(support_points, closed=False, arc_points=[1])
             solid = builder.create_swept_disk_solid(polyline, support_radius)
 
             support_disk_circle = builder.circle(radius=support_disk_radius)
             support_disk = builder.extrude(support_disk_circle, support_disk_depth, position=support_points[-1],
                                            **builder.extrude_by_y_kwargs())
-            return [solid, support_disk]
+            items_3d.extend([solid, support_disk])
+
+        def get_fillet_points(v0, v1, v2, radius):
+            """get fillet points between edges v0v1 and v1v2"""
+            dir1 = (v0 - v1).normalized()
+            dir2 = (v2 - v1).normalized()
+            edge_angle = dir1.angle(dir2)
+            slide_distance = radius / tan(edge_angle / 2)
+
+            fillet_v1co = v1 + (dir1 * slide_distance)
+            fillet_v2co = v1 + (dir2 * slide_distance)
+
+            normal = mathutils.geometry.normal([v0, v1, v2])
+
+            center = mathutils.geometry.intersect_line_line(
+                fillet_v1co, fillet_v1co + normal.cross(dir1), fillet_v2co, fillet_v2co + normal.cross(dir2)
+            )[0]
+
+            midpointco = center + ((fillet_v1co.lerp(fillet_v2co, 0.5) - center).normalized() * radius)
+            return fillet_v1co, midpointco, fillet_v2co
+
+        def add_arcs_on_turnings_points(base_points):
+            if len(base_points) < 3:
+                return base_points
+
+            output_points = base_points[:1]
+            prev_dir = (base_points[1] - base_points[0]).normalized()
+            
+            i = 1
+            while i < len(base_points) - 1:
+                cur_dir = (base_points[i+1] - base_points[i]).normalized()
+                print('current angle', angle:=cur_dir.angle(prev_dir), float_is_zero(angle))
+
+                if collinear(cur_dir, prev_dir):
+                    output_points.append(base_points[i])
+                else:
+                    fillet_points = get_fillet_points(base_points[i-1], base_points[i], base_points[i+1], railing_fillet_radius)
+                    output_points.extend(fillet_points)
+                    arc_points.append(fillet_points[1])
+                
+                prev_dir = cur_dir
+                i = i + 1
+
+            output_points.append(base_points[-1])
+            return output_points
+
+        def add_supports(railing_coords, manual_supports=False):
+            simplified_coords = [railing_coords[0]]
+
+            prev_dir = (railing_coords[1] - railing_coords[0]).normalized()
+            for i in range(1, len(railing_coords)-1):
+                cur_dir = (railing_coords[i+1] - railing_coords[i]).normalized()
+                if not collinear(cur_dir, prev_dir):
+                    simplified_coords.append(railing_coords[i])
+                    prev_dir = cur_dir
+                elif manual_supports:
+                    add_support_on_point(
+                        point=railing_coords[i],
+                        direction=cur_dir
+                    )
+            simplified_coords.append(railing_coords[-1])
+
+            if manual_supports:
+                return
+
+            # create automatic supports
+            for i in range(0, len(simplified_coords)-1):
+                v0, v1 = simplified_coords[i:i+2]
+                edge = v1 - v0
+                length = edge.length
+                edge_dir = edge.normalized()
+                n_supports, support_offset = divmod(length, support_spacing)
+                n_supports = int(n_supports) + 1
+                support_offset /= 2
+
+                start_position = v0 + support_offset * edge_dir
+                for support_i in range(n_supports):
+                    support_position = start_position + support_i * support_spacing * edge_dir
+                    add_support_on_point(
+                        point=support_position,
+                        direction=edge
+                    )
+
+        add_supports(railing_coords, manual_supports=use_manual_supports)
+        railing_coords = add_arcs_on_turnings_points(railing_coords)
 
         pprint(railing_coords) # TODO: rad
-        support_items = get_support_on_point(
-            point=(railing_coords[0] + railing_coords[-1])/2,
-            direction=(railing_coords[-1]-railing_coords[0])
-        )
-        items_3d.extend(support_items)
 
         add_cap(start=True)
         add_cap(start=False)
