@@ -205,18 +205,55 @@ def update_railing_modifier_bmesh(context):
 
 def get_path_data(obj):
     si_conversion = ifcopenshell.util.unit.calculate_unit_scale(tool.Ifc.get())
-    if obj.mode == "EDIT":
-        # otherwise mesh may not contain all changes
-        # added in edit mode
-        obj.update_from_editmode()
 
-    mesh = obj.data
-    path_data = dict()
-    path_data["edges"] = [e.vertices[:] for e in mesh.edges]
-    path_data["verts"] = [v.co / si_conversion for v in mesh.vertices]
-
-    if not path_data["edges"] or not path_data["verts"]:
+    bm = tool.Blender.get_bmesh_for_mesh(obj.data)
+    end_points = [v for v in bm.verts if len(v.link_edges) == 1]
+    if not end_points:
         return None
+
+    # if we have some previous data then we try to match
+    # start or end of the path with the previous path
+    previous_data = False
+    if previous_data:
+        previous_start = previous_data[0]
+        previous_end = previous_data[-1]
+        
+        potential_start = min([(v, (v.co-previous_start).length) for v in end_points], key = lambda v_data: v_data[1])
+        potential_end = min([(v, (v.co-previous_end).length) for v in end_points], key = lambda v_data: v_data[1])
+        
+        if potential_start[1] < potential_end[1]:
+            start_point = potential_start[0]
+        else:
+            start_point = next(v for v in end_points if v != potential_start[0])
+    else:
+        start_point = min(end_points, key=lambda v: v.index)
+
+    # walking through the path 
+    # to make sure all verts and in consequent order
+    edge = start_point.link_edges[0]
+    v = edge.other_vert(start_point)
+    points = [start_point.co, v.co]
+    segments = [(0,1)]
+    i = 2
+
+    other_edge = lambda edges, edge: next(e for e in edges if e != edge)
+
+    while len(link_edges := v.link_edges) != 1:
+        link_edges = v.link_edges
+        edge = other_edge(link_edges, edge)
+        v = edge.other_vert(v)
+        points.append(v.co)
+        segments.append((i-1, i))
+        i += 1
+
+    path_data = {
+        "edges": segments,
+        "verts": [p / si_conversion for p in points]
+    }
+
+    print('path_data')
+    pprint(path_data)
+
     return path_data
 
 
@@ -369,6 +406,37 @@ class FinishEditingRailing(bpy.types.Operator, tool.Ifc.Operator):
         railing_data = props.get_general_kwargs()
         railing_data["path_data"] = path_data
         props.is_editing = -1
+
+        update_bbim_railing_pset(element, railing_data)
+        update_railing_modifier_ifc_data(context)
+        return {"FINISHED"}
+    
+
+class FlipRailingPathOrder(bpy.types.Operator, tool.Ifc.Operator):
+    bl_idname = "bim.flip_railing_path_order"
+    bl_label = "Flip Railing Path Order"
+    bl_description = "Can be useful to maintain railing supports direction"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def _execute(self, context):
+        obj = context.active_object
+        element = tool.Ifc.get_entity(obj)
+        props = obj.BIMRailingProperties
+
+        if not RailingData.is_loaded:
+            RailingData.load()
+        path_data = RailingData.data["parameters"]["data_dict"]["path_data"]
+
+        # flip the vertex order and edges
+        path_data["verts"] = path_data["verts"][::-1]
+        last_vert_i = len(path_data["verts"]) - 1
+        edges = []
+        for edge in path_data["edges"][::-1]:
+            edge = [abs(vi - last_vert_i) for vi in edge[::-1]]
+            edges.append(edge)
+
+        railing_data = props.get_general_kwargs()
+        railing_data["path_data"] = path_data
 
         update_bbim_railing_pset(element, railing_data)
         update_railing_modifier_ifc_data(context)
