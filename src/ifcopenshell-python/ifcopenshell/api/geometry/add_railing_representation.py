@@ -88,29 +88,13 @@ class Usecase:
         support_disk_radius = railing_radius
         support_disk_depth = self.convert_si_to_unit(mm(20))
 
-
         # util functions
         float_is_zero = lambda f: 0.0001 >= f >= -0.0001
         collinear = lambda d0, d1: float_is_zero(d0.angle(d1))
 
-        
-        def add_cap(start=False):
-            nonlocal railing_coords, arc_points            
-            railing_coords_for_cap = railing_coords[::-1] if start else railing_coords
-
-            start = railing_coords_for_cap[-1]
-            cap_dir = (railing_coords_for_cap[-1]-railing_coords_for_cap[-2]).xy.to_3d().normalized()
-            arc_point = start + cap_dir * terminal_radius + terminal_radius*z_down
-            arc_points.append(arc_point)
-            cap_coords = [arc_point, start + terminal_radius * 2 * z_down]
-
-            railing_coords = railing_coords_for_cap + cap_coords
-
-            if start:
-                railing_coords = railing_coords[::-1]
-
-        def add_support_on_point(point, direction):
-            ortho_dir = (direction.yx * V(1, -1)).to_3d().normalized()
+        def add_support_on_point(point, railing_direction):
+            """create a support arc and a disk based on the position and direction of the railing"""
+            ortho_dir = (railing_direction.yx * V(1, -1)).to_3d().normalized()
             arc_center = point + ortho_dir * support_length
             support_points = [
                 point, 
@@ -122,7 +106,7 @@ class Usecase:
             support_disk_circle = builder.circle(radius=support_disk_radius)
             support_disk = builder.extrude(support_disk_circle, support_disk_depth, position=support_points[-1],
                                            **builder.extrude_by_y_kwargs())
-            items_3d.extend([solid, support_disk])
+            return [solid, support_disk]
 
         def get_fillet_points(v0, v1, v2, radius):
             """get fillet points between edges v0v1 and v1v2"""
@@ -135,7 +119,6 @@ class Usecase:
             fillet_v2co = v1 + (dir2 * slide_distance)
 
             normal = mathutils.geometry.normal([v0, v1, v2])
-
             center = mathutils.geometry.intersect_line_line(
                 fillet_v1co, fillet_v1co + normal.cross(dir1), fillet_v2co, fillet_v2co + normal.cross(dir2)
             )[0]
@@ -144,16 +127,16 @@ class Usecase:
             return fillet_v1co, midpointco, fillet_v2co
 
         def add_arcs_on_turnings_points(base_points):
+            """add 3 point fillet arcs on turning points of the railing path"""
             if len(base_points) < 3:
                 return base_points
 
+            # looking for turning points by checking non-collinear edges
             output_points = base_points[:1]
             prev_dir = (base_points[1] - base_points[0]).normalized()
-            
             i = 1
             while i < len(base_points) - 1:
                 cur_dir = (base_points[i+1] - base_points[i]).normalized()
-                print('current angle', angle:=cur_dir.angle(prev_dir), float_is_zero(angle))
 
                 if collinear(cur_dir, prev_dir):
                     output_points.append(base_points[i])
@@ -168,26 +151,37 @@ class Usecase:
             output_points.append(base_points[-1])
             return output_points
 
-        def add_supports(railing_coords, manual_supports=False):
-            simplified_coords = [railing_coords[0]]
+        def create_supports_items(railing_coords, manual_supports=False):
+            """create supports items based on the railing coordinates"""
+            supports_items = []
 
+            # simplified_coords is a list of points that form non-collinear edges
+            simplified_coords = [railing_coords[0]]
             prev_dir = (railing_coords[1] - railing_coords[0]).normalized()
+
+            # iterating over each edge of the railing path
             for i in range(1, len(railing_coords)-1):
                 cur_dir = (railing_coords[i+1] - railing_coords[i]).normalized()
+
                 if not collinear(cur_dir, prev_dir):
                     simplified_coords.append(railing_coords[i])
                     prev_dir = cur_dir
+
+                # for manual supports each vertex on the railing path edge
+                # will be a point for a support
                 elif manual_supports:
-                    add_support_on_point(
-                        point=railing_coords[i],
-                        direction=cur_dir
-                    )
+                    supports_items.extend(
+                        add_support_on_point(
+                            point=railing_coords[i],
+                            railing_direction=cur_dir
+                    ))
+
             simplified_coords.append(railing_coords[-1])
 
             if manual_supports:
-                return
+                return supports_items
 
-            # create automatic supports
+            # create automatic supports based on the support spacing
             for i in range(0, len(simplified_coords)-1):
                 v0, v1 = simplified_coords[i:i+2]
                 edge = v1 - v0
@@ -200,15 +194,32 @@ class Usecase:
                 start_position = v0 + support_offset * edge_dir
                 for support_i in range(n_supports):
                     support_position = start_position + support_i * support_spacing * edge_dir
-                    add_support_on_point(
+                    supports_items.extend(add_support_on_point(
                         point=support_position,
-                        direction=edge
-                    )
+                        railing_direction=edge
+                    ))
+            
+            return supports_items
 
-        add_supports(railing_coords, manual_supports=use_manual_supports)
+        def add_cap(start=False):
+            """add handrail terminal cap"""
+            # TODO: implement more cap types
+            nonlocal railing_coords, arc_points            
+            railing_coords_for_cap = railing_coords[::-1] if start else railing_coords
+
+            start = railing_coords_for_cap[-1]
+            cap_dir = (railing_coords_for_cap[-1]-railing_coords_for_cap[-2]).xy.to_3d().normalized()
+            arc_point = start + cap_dir * terminal_radius + terminal_radius*z_down
+            arc_points.append(arc_point)
+            cap_coords = [arc_point, start + terminal_radius * 2 * z_down]
+
+            railing_coords = railing_coords_for_cap + cap_coords
+
+            if start:
+                railing_coords = railing_coords[::-1]
+
+        items_3d.extend(create_supports_items(railing_coords, manual_supports=use_manual_supports))
         railing_coords = add_arcs_on_turnings_points(railing_coords)
-
-        pprint(railing_coords) # TODO: rad
 
         add_cap(start=True)
         add_cap(start=False)

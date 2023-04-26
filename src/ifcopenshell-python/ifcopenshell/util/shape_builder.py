@@ -532,8 +532,8 @@ class ShapeBuilder:
         return extruded_area
 
     def create_swept_disk_solid(self, path_curve, radius):
+        """Create IfcSweptDiskSolid from `path_curve` (must be 3D) and `radius`"""
         if path_curve.Dim != 3:
-            # TODO: replace with exception
             raise Exception(
                 f"Path curve for IfcSweptDiskSolid should be 3D to be valid, currently it has {path_curve.Dim} dimensions.\n"
                 "Ref: https://ifc43-docs.standards.buildingsmart.org/IFC/RELEASE/IFC4x3/HTML/lexical/IfcSweptDiskSolid.htm#8.8.3.42.4-Formal-propositions"
